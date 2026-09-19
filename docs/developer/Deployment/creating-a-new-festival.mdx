@@ -1,0 +1,1085 @@
+import "./new-festival.css";
+
+# Creating a New Festival Site
+
+This guide covers the complete process for creating a new Your Next Festival (YNF) site, from the initial server and environment configuration through to running the web installer, automatic YN Auth provisioning, verification, and final security lockdown.
+
+This process should be followed for every new festival deployment.
+
+:::warning[Important provisioning rule]
+
+Do not manually create YN Auth application credentials for a new festival.
+
+The installation process automatically registers the festival with YN Auth and stores the resulting application credentials in the festival database.
+
+`YN_AUTH_CLIENT_ID` and `YN_AUTH_CLIENT_SECRET` should not be manually provisioned as part of a new installation.
+
+:::
+
+## Overview
+
+A new YNF deployment consists of two main systems:
+
+<div className="ynf-architecture">
+	<div className="ynf-flow-card">
+		<strong>Festival Site</strong>
+		<span>Festival-specific application and data</span>
+	</div>
+	<div className="ynf-flow-arrow">↓</div>{" "}
+	<div className="ynf-flow-card">
+		<strong>Central YN Auth</strong>
+		<span>Shared authentication and integrations</span>
+	</div>
+</div>
+
+The Festival application owns festival-specific functionality and data. YN Auth provides shared services and integrations used by Festival sites.
+
+During installation, the Festival site registers itself with YN Auth. YN Auth creates an application identity and application credentials, which are returned to the Festival site and stored securely.
+
+### Provisioning flow
+
+<div className="ynf-flow">
+	<div className="ynf-flow-card">
+		<strong>1. Create Site &amp; Databases</strong>
+		<span>Prepare Forge, DNS, SSL and databases</span>
+	</div>
+	<div className="ynf-flow-arrow">↓</div>
+	<div className="ynf-flow-card">
+		<strong>2. Configure Environment</strong>
+		<span>
+			Set application, database and YN Auth bootstrap configuration
+		</span>
+	</div>
+	<div className="ynf-flow-arrow">↓</div>
+	<div className="ynf-flow-card">
+		<strong>3. Enable Installer</strong>
+		<span>
+			Expose <code>`/install`</code> for the fresh deployment
+		</span>
+	</div>
+	<div className="ynf-flow-arrow">↓</div>
+	<div className="ynf-flow-card">
+		<strong>4. Run Installation</strong>
+		<span>Complete checks and enter the Festival details</span>
+	</div>
+	<div className="ynf-flow-arrow">↓</div>
+	<div className="ynf-flow-card">
+		<strong>5. Automatic Provisioning</strong>
+		<span>
+			Migrate → configure → seed → register with YN Auth → store
+			credentials → verify
+		</span>
+	</div>
+	<div className="ynf-flow-arrow">↓</div>
+	<div className="ynf-flow-card">
+		<strong>6. Finalise &amp; Verify</strong>
+		<span>
+			Mark complete, disable the installer and verify the deployment
+		</span>
+	</div>
+</div>
+
+## 1. Prerequisites
+
+Before creating the Festival site, make sure the following are available.
+
+### Infrastructure
+
+The production/staging server must support the current YNF application requirements, including:
+
+- PHP compatible with the current Festival release
+- Composer
+- Node.js compatible with the current Vite release
+- npm
+- MySQL
+- HTTPS
+- Laravel queue/scheduler support where required
+- Access to the central YN Auth service
+
+The Festival application is currently deployed using Laravel Forge.
+
+### Repository
+
+The Festival application repository is:
+
+`RobHowdle/festival-schedule`
+
+Choose the appropriate deployment branch for the site being created.
+
+Do not deploy an untested development branch to a production Festival site.
+
+### Domain
+
+Create the required domain or subdomain before beginning installation.
+
+Examples:
+
+- `festival-name.yournextfestival.co.uk`
+- `festivaldomain.co.uk`
+
+DNS must resolve to the server before attempting the web installation.
+
+HTTPS should also be configured before installation so that YN Auth callback URLs are registered using the final HTTPS domain.
+
+:::info[Screenshot required — Forge site creation screen]
+
+Capture the Forge screen after entering the new site's domain but before completing creation.
+
+The screenshot should show:
+
+- Domain
+- Project type
+- Server
+- PHP version
+
+Do not include credentials, IP addresses that should remain private, API keys, or environment secrets.
+
+:::
+
+## 2. Create the Forge Site
+
+Create a new site on the appropriate YNF server in Laravel Forge.
+
+Configure the site to use the Festival repository and the required deployment branch.
+
+The site's web directory must point to Laravel's public directory:
+
+```text
+/public
+```
+
+Once the site exists:
+
+- Configure the Git repository.
+- Select the required branch.
+- Configure the deployment process.
+- Install an SSL certificate.
+- Verify the domain resolves correctly.
+
+:::info[Screenshot required — Forge site overview after creation]
+
+Capture the completed site overview showing the domain and that SSL is active.
+
+:::
+
+:::info[Screenshot required — Forge Git repository configuration]
+
+Show the repository and selected deployment branch.
+
+This is useful because it makes the expected Forge configuration obvious when another Festival site is created later.
+
+:::
+
+## 3. Create the Databases
+
+Each Festival deployment requires its own Festival database and access to its associated authentication/shared database configuration.
+
+The Festival installer expects two Laravel database connections:
+
+- `mysql` — contains Festival-specific data.
+- `ynf_auth` — contains the application's shared authentication-related tables.
+
+The installer manages migrations for both connections.
+
+:::warning[Let the installer own the migration lifecycle]
+
+For a brand-new Festival installation, allow the Festival installer to run the required migrations.
+
+The installer explicitly runs:
+
+- `database/migrations` against the `mysql` connection.
+- `database/migrations-auth` against the `ynf_auth` connection.
+
+Running migrations manually before the installer can produce a state that is different from the lifecycle the installer is designed and tested to manage.
+
+:::
+
+Create the required empty databases and database users in Forge.
+
+Grant the Festival site access to both databases.
+
+:::info[Screenshot required — Forge database list for a disposable documentation/test Festival]
+
+Show the two database names and their association with the site.
+
+Do not expose database passwords.
+
+:::
+
+## 4. Configure the Environment
+
+Open the site's **Environment** configuration in Forge.
+
+Start from the current Festival `.env.example`, then configure the values required for the deployment.
+
+At minimum, confirm the application's normal Laravel configuration:
+
+```dotenv
+APP_NAME="Your Next Festival"
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://your-festival-domain.example
+```
+
+`APP_URL` is particularly important.
+
+YN Auth redirect URLs are generated using the application's configured URL, so the final HTTPS site URL should be configured before installation.
+
+### Festival database
+
+Configure the primary Festival database connection:
+
+```dotenv
+DB_CONNECTION=mysql
+DB_HOST=...
+DB_PORT=3306
+DB_DATABASE=...
+DB_USERNAME=...
+DB_PASSWORD=...
+```
+
+Use the actual database credentials created for the Festival.
+
+### Authentication database
+
+Configure the authentication database connection:
+
+```dotenv
+AUTH_DB_CONNECTION=mysql
+AUTH_DB_HOST=...
+AUTH_DB_PORT=3306
+AUTH_DB_DATABASE=...
+AUTH_DB_USERNAME=...
+AUTH_DB_PASSWORD=...
+```
+
+Never include real passwords in documentation, screenshots, tickets, chat messages, or source control.
+
+## 5. Configure YN Auth Bootstrap Access
+
+A fresh Festival does not initially have normal YN Auth application credentials.
+
+Instead, installation uses the shared provisioning mechanism.
+
+Configure:
+
+```dotenv
+YN_AUTH_URL=https://auth.yournextfestival.co.uk
+YN_AUTH_PROVISIONING_TOKEN=...
+```
+
+The provisioning token must match the provisioning configuration on YN Auth.
+
+:::danger[Sensitive provisioning credential]
+
+`YN_AUTH_PROVISIONING_TOKEN` is sensitive.
+
+Never place its value in:
+
+- documentation
+- screenshots
+- Git commits
+- support tickets
+- logs
+- chat messages
+
+Documentation should only confirm whether the value is configured.
+
+:::
+
+### Do not create application credentials manually
+
+A fresh installation should not require:
+
+```dotenv
+YN_AUTH_CLIENT_ID=
+YN_AUTH_CLIENT_SECRET=
+```
+
+The Festival installer creates its YN Auth application automatically.
+
+The returned application credentials are persisted by the Festival application in the `yn_auth_credentials` table.
+
+Normal runtime configuration can then load those stored credentials.
+
+:::note[Legacy compatibility]
+
+The current application configuration retains compatibility references for `YN_AUTH_CLIENT_ID` and `YN_AUTH_CLIENT_SECRET`.
+
+These are not part of the intended new-site provisioning workflow.
+
+New installations should rely on automatic provisioning and DB-backed credentials.
+
+:::
+
+## 6. Enable the Installer
+
+The installer is protected by `YNF_INSTALLER_ENABLED`.
+
+For a new installation, set:
+
+```dotenv
+YNF_INSTALLER_ENABLED=true
+```
+
+The `/install` route is available only when:
+
+- the installer flag is enabled; and
+- the application is not already marked as installed.
+
+If the installer is disabled, `/install` returns `404`.
+
+If installation has already completed, `/install` also returns `404`.
+
+This prevents the installer being reused against an active Festival site.
+
+After changing the environment, clear Laravel's cached configuration if necessary:
+
+```bash
+php artisan optimize:clear
+```
+
+Verify the installer flag without exposing any secrets:
+
+```bash
+php artisan tinker --execute="
+dump([
+    'installer_enabled' => config('ynf.installer_enabled'),
+]);
+"
+```
+
+Expected result:
+
+```text
+installer_enabled => true
+```
+
+:::info[Screenshot required — Forge Environment screen showing `YNF_INSTALLER_ENABLED`=true]
+
+Crop the screenshot tightly.
+
+Do not include surrounding secrets. If this cannot be done safely, omit this screenshot and use the command-line verification above instead.
+
+:::
+
+## 7. Pre-Installation Checks
+
+Before opening the installer, confirm that the site represents a genuinely fresh installation.
+
+Where appropriate, verify that no Festival YN Auth credentials already exist:
+
+```bash
+php artisan tinker --execute="
+dump([
+    'yn_auth_credentials' => \App\Models\YnAuthCredential::query()->count(),
+]);
+"
+```
+
+For a genuinely fresh deployment, expect:
+
+```text
+yn_auth_credentials => 0
+```
+
+Normal YN Auth application credentials should not be present yet.
+
+The provisioning token should be configured, but its value must never be printed.
+
+A safe configuration check can use:
+
+```bash
+php artisan tinker --execute="
+dump([
+    'yn_auth_url_set' => filled(config('services.yn_auth.url')),
+    'provisioning_token_set' => filled(config('services.yn_auth.provisioning_token')),
+    'client_id_set' => filled(config('services.yn_auth.client_id')),
+    'client_secret_set' => filled(config('services.yn_auth.client_secret')),
+]);
+"
+```
+
+For the intended fresh-install state, expect:
+
+```text
+yn_auth_url_set => true
+provisioning_token_set => true
+client_id_set => false
+client_secret_set => false
+```
+
+## 8. Open the Installer
+
+Navigate to:
+
+`https://your-festival-domain.example/install`
+
+The installation page should load normally.
+
+The installer obtains the reCAPTCHA configuration required during installation through the YN Auth provisioning channel.
+
+This is important because the Festival does not yet possess its normal YN Auth application credentials.
+
+:::info[Screenshot required — Fresh `/install` landing page]
+
+Use the disposable documentation Festival for this screenshot.
+
+Capture the full installer page before entering festival-specific information.
+
+:::
+
+### System checks
+
+Review the installer system checks before continuing.
+
+Do not continue if the installer reports a failed mandatory requirement.
+
+:::info[Screenshot required — Installer system checks with all required checks passing]
+
+This should become one of the most useful screenshots in this guide because a future operator can visually compare a new deployment against a known-good installation.
+
+:::
+
+## 9. Enter the Festival Details
+
+Enter the details for the Festival.
+
+The installer requires:
+
+- Festival name
+- Festival slug
+- Start date
+- End date
+- Timezone
+
+### Festival slug
+
+The slug must contain lowercase letters and numbers, with optional hyphens.
+
+For example:
+
+- `download-festival`
+- `beta-site`
+
+The following format is enforced:
+
+```text
+^[a-z0-9]+(?:-[a-z0-9]+)*$
+```
+
+Choose the slug carefully. The Festival slug is also used when registering the application with YN Auth and forms part of the Festival's identity across the platform.
+
+For example, if the following Festival details are entered:
+
+| Field    | Value       |
+| -------- | ----------- |
+| **Name** | Beta Site   |
+| **Slug** | `beta-site` |
+
+YN Auth will register the application with the corresponding identity:
+
+| Field                | Value       |
+| -------------------- | ----------- |
+| **Application name** | Beta Site   |
+| **Application slug** | `beta-site` |
+
+The slug therefore forms part of the Festival's identity across the platform.
+
+### Dates
+
+Dates must use:
+
+`YYYY-MM-DD`
+
+The end date cannot be earlier than the start date.
+
+### Timezone
+
+Select the correct timezone for the Festival location.
+
+For UK festivals this will normally be:
+
+`Europe/London`
+
+:::info[Screenshot required — Completed Festival details step]
+
+Use clearly fake/test Festival information when capturing documentation screenshots.
+
+Do not use a real customer installation unless the customer information is appropriate for documentation.
+
+:::
+
+## 10. Run the Installation
+
+Start the installation from the web installer.
+
+Do not refresh or close the installation page while installation is running.
+
+The installer reports progress as each installation stage completes.
+
+:::info[Screenshot required — Installation progress while the installer is running]
+
+Ideally capture the screen when several stages are complete and one stage is actively running.
+
+:::
+The installer performs the following operations automatically.
+
+### 10.1 Validate Festival details
+
+The Festival name, slug, dates and timezone are validated.
+
+### 10.2 Run database migrations
+
+The installer runs Festival migrations against:
+
+`mysql`
+
+using:
+
+`database/migrations`
+
+It then runs authentication migrations against:
+
+`ynf_auth`
+
+using:
+
+`database/migrations-auth`
+
+### 10.3 Record installation state
+
+The installation is marked:
+
+`pending`
+
+while setup is in progress.
+
+If installation fails, the installer attempts to record:
+
+`failed`
+
+The application is not considered installed until finalisation completes successfully.
+
+### 10.4 Configure the Festival
+
+The Festival configuration is created from the details supplied through the installer.
+
+### 10.5 Seed installation data
+
+The installer seeds the initial application data, including required roles and permissions.
+
+It also creates the initial YNF administrator account where required.
+
+### 10.6 Register with YN Auth
+
+For a newly-created Festival, the installer contacts:
+
+`YN_AUTH_URL`
+
+using the provisioning token.
+
+It registers the Festival with YN Auth and supplies:
+
+- Festival name
+- Festival slug
+- Description, where available
+- TIDAL callback URL
+- YouTube Music callback URL
+
+The callback URLs are generated from the Festival application's configured URL.
+
+YN Auth returns:
+
+`application ID`
+
+`client ID`
+
+`client secret`
+
+The Festival installer validates that all three values were returned.
+
+### 10.7 Store YN Auth credentials
+
+The returned credentials are persisted in:
+
+`yn_auth_credentials`
+
+The application does not require an operator to copy the generated secret into `.env`.
+
+The newly-created credentials are also made available to the current PHP process so that the remainder of installation can immediately communicate with YN Auth.
+
+### 10.8 Verify the installation
+
+Before the installer can complete, it verifies the resulting installation.
+
+This includes checking that:
+
+- the Festival record exists;
+- the initial YNF administrator exists;
+- the administrator has the Admin role;
+- required permissions exist; and
+- the administrator possesses the required permissions.
+
+Installation verification must pass before finalisation.
+
+## 11. Installer Finalisation
+
+After installation and verification succeed, the installer performs a finalisation step.
+
+This step:
+
+1. Obtains an exclusive lock on the active `.env`.
+2. Changes `YNF_INSTALLER_ENABLED` from `true` to `false`.
+3. Refreshes cached configuration where required.
+4. Marks the installation state as `complete`.
+5. Disables the installer in the current application process.
+
+The finalisation process is designed so that the application is not marked complete before the installer has successfully disabled itself.
+
+If finalisation fails, the installer attempts to restore the previous environment state rather than leaving a partially-finalised installation.
+
+:::info[Screenshot required — Successful installation completion screen]
+
+Capture the final success state before navigating away.
+
+Do not expose any generated passwords or secrets if the completion screen displays them.
+
+:::
+
+## 12. Verify the Festival Installation
+
+Do not treat the successful browser screen alone as sufficient verification.
+
+Perform the following server-side checks.
+
+From the Festival deployment:
+
+```bash
+cd ~/your-festival-domain/current
+```
+
+Clear Laravel's cached configuration:
+
+```bash
+php artisan optimize:clear
+```
+
+Then verify the installation state and runtime credentials:
+
+```bash
+php artisan tinker --execute="
+dump([
+    'installer_enabled' => config('ynf.installer_enabled'),
+    'is_installed' => app(\App\Services\FestivalInstallation\InstallationState::class)->isInstalled(),
+    'yn_auth_credentials' => \App\Models\YnAuthCredential::query()->count(),
+    'runtime_client_id_set' => filled(config('services.yn_auth.client_id')),
+    'runtime_client_secret_set' => filled(config('services.yn_auth.client_secret')),
+]);
+"
+```
+
+A successful installation should report:
+
+```text
+installer_enabled => false
+is_installed => true
+yn_auth_credentials => 1
+runtime_client_id_set => true
+runtime_client_secret_set => true
+```
+
+This check is deliberately performed after clearing Laravel's caches.
+
+That verifies the Festival can reload its YN Auth application credentials from persistent storage rather than relying on credentials left only in the installation process or configuration cache.
+
+## 13. Verify the Installation State
+
+The installation state should now be:
+
+`complete`
+
+To inspect it:
+
+```bash
+php artisan tinker --execute="
+dump(
+    \Illuminate\Support\Facades\DB::connection('mysql')
+        ->table('installation_states')
+        ->orderByDesc('id')
+        ->first(['status', 'completed_at'])
+);
+"
+```
+
+Expected result:
+
+```text
+status => complete
+completed_at => INSTALLATION_COMPLETION_TIME
+```
+
+## 14. Verify the YN Auth Credential Record
+
+Inspect only safe credential metadata.
+
+Never print the client secret.
+
+```bash
+php artisan tinker --execute="
+dump(
+    \App\Models\YnAuthCredential::query()
+        ->get([
+            'id',
+            'application_id',
+            'client_id',
+            'created_at',
+            'updated_at',
+        ])
+        ->toArray()
+);
+"
+```
+
+There should be exactly one credential record for a standard fresh Festival installation.
+
+Record the `application_id` for the next verification step.
+
+## 15. Verify the YN Auth Application
+
+Connect to the YN Auth deployment:
+
+cd ~/auth.yournextfestival.co.uk/current
+
+Find the application using the Festival slug:
+
+Connect to the YN Auth deployment:
+
+```bash
+cd ~/auth.yournextfestival.co.uk/current
+```
+
+Find the application using the Festival slug:
+
+```bash
+php artisan tinker --execute="
+\$app = \App\Models\Application::query()
+    ->where('slug', 'YOUR-FESTIVAL-SLUG')
+    ->first();
+
+dump(\$app ? [
+    'id' => \$app->id,
+    'name' => \$app->name,
+    'slug' => \$app->slug,
+    'created_at' => \$app->created_at,
+] : null);
+"
+```
+
+Replace `YOUR-FESTIVAL-SLUG` with the slug entered into the installer.
+
+The returned application ID should match the `application_id` stored by the Festival.
+
+## 16. Verify YN Auth Relationships
+
+Using the YN Auth application ID, verify the application relationships:
+
+```bash
+php artisan tinker --execute="
+dump([
+    'credentials' => \Illuminate\Support\Facades\DB::table('application_credentials')
+        ->where('application_id', APPLICATION_ID)
+        ->count(),
+
+    'access_tokens' => \Illuminate\Support\Facades\DB::table('application_access_tokens')
+        ->where('application_id', APPLICATION_ID)
+        ->count(),
+
+    'user_links' => \Illuminate\Support\Facades\DB::table('user_links')
+        ->where('application_id', APPLICATION_ID)
+        ->count(),
+
+    'oauth_states' => \Illuminate\Support\Facades\DB::table('oauth_states')
+        ->where('application_id', APPLICATION_ID)
+        ->count(),
+]);
+"
+```
+
+Replace `APPLICATION_ID` with the actual application ID.
+
+For a newly-provisioned application, verify:
+
+```text
+credentials => 1
+```
+
+Do not assume fixed values for `access_tokens`, `user_links`, or `oauth_states`. These depend on activity since installation.
+
+For example, the application may acquire an access token as soon as the Festival begins authenticated communication with YN Auth.
+
+## 17. Verify the Installer Is Locked
+
+Visit:
+
+`https://your-festival-domain.example/install`
+
+The route should now return:
+
+`404`
+
+This is expected.
+
+A completed Festival installation must not expose the installer.
+
+:::info[Screenshot required — Browser showing the `/install` 404 after successful installation]
+
+This demonstrates the expected post-install security state.
+
+:::
+
+## 18. Verify Forge Environment State
+
+Check the Forge environment configuration.
+
+The installer should have changed the active deployment environment to:
+
+`YNF_INSTALLER_ENABLED=false`
+
+The Forge-managed environment should also ultimately contain:
+
+`YNF_INSTALLER_ENABLED=false`
+
+On release-based Forge deployments, verify both the site-level environment and active release environment where applicable.
+
+A safe server check is:
+
+```bash
+grep '^YNF_INSTALLER_ENABLED=' \
+    /home/forge/YOUR-SITE/.env \
+    /home/forge/YOUR-SITE/current/.env
+```
+
+Both environments should report:
+
+```text
+YNF_INSTALLER_ENABLED=false
+```
+
+:::warning[Forge release environments]
+
+Do not assume that changing the Forge Environment UI has necessarily changed an already-active release's `.env`.
+
+Release-based deployments can result in the site-level `.env` and active release environment temporarily differing.
+
+Always verify the active release after changing installation-related environment configuration.
+
+:::
+
+If the values differ, investigate and correct the deployment/environment synchronisation before considering the site fully provisioned.
+
+## 19. Verify Legacy YN Auth Credentials Are Absent
+
+A newly-provisioned Festival should not require manually-managed YN Auth application credentials in `.env`.
+
+Check the variable names only:
+
+```bash
+grep -E '^YN_AUTH_(CLIENT_ID|CLIENT_SECRET)=' .env
+```
+
+For a new DB-backed installation, this should normally return no output.
+
+Do not print or copy secret values into documentation.
+
+The application should instead resolve its runtime credentials from the persisted `yn_auth_credentials` record.
+
+## 20. Verify Administrator Access
+
+Sign in using the administrator account created during installation.
+
+Confirm:
+
+- Login succeeds.
+- The Admin dashboard loads.
+- The account has the Admin role.
+- Protected Admin functionality is accessible.
+
+The installer itself verifies the initial administrator's required permission set before marking installation complete.
+
+:::info[Screenshot required — First successful Admin dashboard login]
+
+Use the disposable documentation site.
+
+This screenshot should show the dashboard immediately after a completely fresh installation.
+
+:::
+
+## 21. Post-Installation Checklist
+
+Before handing the site over for configuration, verify all of the following:
+
+- [ ] Domain resolves correctly
+- [ ] HTTPS certificate is active
+- [ ] Correct application branch is deployed
+- [ ] APP_DEBUG=false on production
+- [ ] Festival database configured
+- [ ] Authentication database configured
+- [ ] YN Auth URL configured
+- [ ] YN Auth provisioning token configured
+- [ ] No manually-created YN Auth client credentials are required
+- [ ] `/install` loaded successfully before installation
+- [ ] Installer system checks passed
+- [ ] Festival installation completed
+- [ ] `installation_states.status` is complete
+- [ ] Exactly one Festival `yn_auth_credentials` record exists
+- [ ] Corresponding YN Auth application exists
+- [ ] Festival and YN Auth application IDs match
+- [ ] Exactly one YN Auth application credential exists
+- [ ] Runtime YN Auth credentials resolve after `optimize`
+- [ ] Administrator can log in
+- [ ] Admin role and permissions are present
+- [ ] `YNF_INSTALLER_ENABLED=false`
+- [ ] Forge environment and active release agree
+- [ ] `/install` returns `404`
+- [ ] No secrets were committed to Git
+- [ ] No secrets were included in screenshots or documentation
+
+Only after this checklist passes should the Festival be considered successfully provisioned.
+
+## Troubleshooting
+
+### `/install` returns 404 before installation
+
+Check the current installer state:
+
+```bash
+php artisan tinker --execute="
+dump([
+    'installer_enabled' => config('ynf.installer_enabled'),
+    'is_installed' => app(\App\Services\FestivalInstallation\InstallationState::class)->isInstalled(),
+]);
+"
+```
+
+For a fresh installation, expect:
+
+```text
+installer_enabled => true
+is_installed => false
+```
+
+If `installer_enabled` is `false`, verify that the active release environment contains:
+
+```dotenv
+YNF_INSTALLER_ENABLED=true
+```
+
+Then clear Laravel's cached configuration:
+
+```bash
+php artisan optimize:clear
+```
+
+### Installer returns 503
+
+The installer deliberately fails closed if it cannot determine the installation state.
+
+Check the Laravel logs rather than attempting to bypass the installer middleware.
+
+### Installer page fails while loading reCAPTCHA
+
+A fresh Festival does not yet have normal YN Auth application credentials.
+
+Installer reCAPTCHA configuration therefore uses the YN Auth provisioning authentication path.
+
+Check that both `YN_AUTH_URL` and `YN_AUTH_PROVISIONING_TOKEN` are configured.
+
+Do not solve this by manually creating `YN_AUTH_CLIENT_ID` and `YN_AUTH_CLIENT_SECRET`.
+
+That can hide a broken provisioning lifecycle.
+
+### `Unexpected token '<'` while opening the installer
+
+This can indicate that a frontend request expected JSON but received an HTML error response.
+
+Check the Festival Laravel logs.
+
+Historically, this occurred when global reCAPTCHA configuration attempted to use normal YN Auth application authentication before the Festival had been provisioned.
+
+The installer now has a dedicated provisioning-authenticated reCAPTCHA bootstrap path.
+
+If this error reappears, treat it as a regression rather than manually adding application credentials.
+
+### YN Auth registration fails
+
+Check that:
+
+- `YN_AUTH_URL` is correct.
+- The provisioning token is configured.
+- Festival and YN Auth provisioning configuration agree.
+- YN Auth is reachable from the Festival server.
+- YN Auth logs contain the corresponding request.
+
+Do not log or print the provisioning token.
+
+The Festival intentionally returns a generic installation failure rather than exposing an upstream YN Auth response body.
+
+### Installation fails part-way through
+
+Do not manually mark the installation complete.
+
+The installer records a failed installation state where possible.
+
+Investigate the original exception first.
+
+The application should only reach:
+
+```text
+complete
+```
+
+after installation verification and finalisation succeed.
+
+### YN Auth application exists but Festival has no credentials
+
+Do not immediately create another application.
+
+First inspect `yn_auth_credentials` on the Festival and the following tables on YN Auth:
+
+- `applications`
+- `application_credentials`
+
+Determine whether the provisioning operation partially completed before retrying.
+
+Blindly rerunning provisioning may create duplicate application identities or credentials.
+
+### Festival credentials exist but runtime authentication fails
+
+First clear Laravel's cached configuration:
+
+```bash
+php artisan optimize:clear
+```
+
+Then verify the runtime credential state:
+
+```bash
+php artisan tinker --execute="
+dump([
+    'credentials' => \App\Models\YnAuthCredential::query()->count(),
+    'client_id_set' => filled(config('services.yn_auth.client_id')),
+    'client_secret_set' => filled(config('services.yn_auth.client_secret')),
+]);
+"
+```
+
+Expected:
+
+```text
+credentials => 1
+client_id_set => true
+client_secret_set => true
+```
+
+Never dump the actual client secret.
