@@ -257,18 +257,31 @@ Never include real passwords in documentation, screenshots, tickets, chat messag
 
 ## 5. Configure YN Auth Bootstrap Access
 
-A fresh Festival does not initially have normal YN Auth application credentials.
+A fresh Festival does not yet have its own YN Auth application credentials. The installer uses a shared provisioning token to register it securely.
 
-Instead, installation uses the shared provisioning mechanism.
+### Create the provisioning token
 
-Configure:
+This is a one-time setup on central YN Auth.
 
-```dotenv
-YN_AUTH_URL=https://auth.yournextfestival.co.uk
-YN_AUTH_PROVISIONING_TOKEN=...
+If YN Auth already has a provisioning token configured, reuse that same value. Do not generate a separate token for each Festival.
+
+Generate a secure token locally:
+
+```bash
+openssl rand -hex 32
 ```
 
-The provisioning token must match the provisioning configuration on YN Auth.
+Store it immediately in the central YN Auth Forge environment:
+
+```dotenv
+YN_AUTH_PROVISIONING_TOKEN=generated-value
+```
+
+Clear YN Auth's cached configuration:
+
+```bash
+php artisan optimize:clear
+```
 
 :::danger[Sensitive provisioning credential]
 
@@ -287,28 +300,63 @@ Documentation should only confirm whether the value is configured.
 
 :::
 
-### Do not create application credentials manually
+### Configure the Festival installer
 
-A fresh installation should not require:
+Add the central YN Auth URL and the same provisioning token to the new Festival site's Forge environment:
+
+```dotenv
+YN_AUTH_URL=https://auth.yournextfestival.co.uk
+YN_AUTH_PROVISIONING_TOKEN=same-generated-value
+```
+
+The provisioning token must match the value configured on central YN Auth exactly.
+
+During installation, the Festival sends this value to YN Auth as an HTTPS Bearer token.
+
+### Application credentials
+
+Do not manually create or configure the following environment variables for a new Festival:
 
 ```dotenv
 YN_AUTH_CLIENT_ID=
 YN_AUTH_CLIENT_SECRET=
 ```
 
-The Festival installer creates its YN Auth application automatically.
+The Festival installer registers the new Festival with YN Auth automatically.
 
-The returned application credentials are persisted by the Festival application in the `yn_auth_credentials` table.
+YN Auth returns:
 
-Normal runtime configuration can then load those stored credentials.
+- `application_id`
+- `client_id`
+- `client_secret`
+
+The Festival application stores these values automatically in its `yn_auth_credentials` table.
+
+The client secret is encrypted by the Festival application before it is stored.
+
+Normal runtime authentication then loads the stored credentials from the database. The application ID, client ID, and client secret do not need to be copied into Forge manually.
+
+After installation:
+
+1. Verify that the Festival has a stored YN Auth credential.
+2. Verify that the Festival can request an application access token.
+3. Verify that a YN Auth-backed service, such as the reCAPTCHA configuration endpoint, works.
+4. Remove `YN_AUTH_PROVISIONING_TOKEN` from the Festival environment.
+5. Clear the Festival configuration cache.
+
+```bash
+php artisan optimize:clear
+```
+
+The provisioning token must remain configured on central YN Auth so it can provision future Festival sites.
 
 :::note[Legacy compatibility]
 
-The current application configuration retains compatibility references for `YN_AUTH_CLIENT_ID` and `YN_AUTH_CLIENT_SECRET`.
+The application may retain compatibility references for `YN_AUTH_CLIENT_ID` and `YN_AUTH_CLIENT_SECRET`.
 
-These are not part of the intended new-site provisioning workflow.
+These variables are not part of the intended new-site provisioning workflow.
 
-New installations should rely on automatic provisioning and DB-backed credentials.
+New installations should use automatic provisioning and database-backed credentials.
 
 :::
 
